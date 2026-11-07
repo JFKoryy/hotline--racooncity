@@ -27,10 +27,11 @@ const ZOMBIE_STUN_DURATION = 1000;
 const FINAL_BOSS_MAX_HEALTH = 2000;
 const FINAL_BOSS_EXPLOSIVE_THRESHOLD = .4;
 const FINAL_BOSS_BARREL_POSITION = { x: 585, y: 365 };
+const AUTOSAVE_KEY = 'hotline-racooncity-save-v1';
+const AUTOSAVE_INTERVAL_MS = 30_000;
 const BAT_SWING_ARC = Math.PI / 3;
 const BAT_KNOCKBACK_SPEED = 75;
 const BAT_KNOCKBACK_DURATION = 180;
-const PLAYER_INVULNERABLE = true;
 const ZOMBIE_FLASHLIGHT_SPEED_FACTOR = 1.5;
 const STARTING_AMMO = { pistola: 15, escopeta: 7 };
 const HEALING_TYPES = {
@@ -372,24 +373,328 @@ class Recepcion extends Phaser.Scene {
     this.keyupHandler = (ev) => this.movementKeys.delete(ev.key.toLowerCase());
     this.clearMovementKeys = () => this.movementKeys.clear();
     this.clearMovementKeysWhenHidden = () => {
-      if (document.hidden) this.clearMovementKeys();
+      if (document.hidden) {
+        this.clearMovementKeys();
+        this.saveGame();
+      }
     };
     window.addEventListener('keydown', this.keydownHandler, true);
     window.addEventListener('keyup', this.keyupHandler, true);
     window.addEventListener('blur', this.clearMovementKeys);
     document.addEventListener('visibilitychange', this.clearMovementKeysWhenHidden);
+    this.saveOnPageHide = () => this.saveGame();
+    window.addEventListener('pagehide', this.saveOnPageHide);
     this.input.on('pointerdown', () => this.game.canvas.focus());
     this.events.once('shutdown', () => {
       window.removeEventListener('keydown', this.keydownHandler, true);
       window.removeEventListener('keyup', this.keyupHandler, true);
       window.removeEventListener('blur', this.clearMovementKeys);
       document.removeEventListener('visibilitychange', this.clearMovementKeysWhenHidden);
+      window.removeEventListener('pagehide', this.saveOnPageHide);
+      window.clearInterval(this.autosaveInterval);
     });
 
     this.setReceptionInteractables();
 
     this.refresh();
     this.updateHealthHud();
+    this.updateSaveMenu();
+    this.autosaveInterval = window.setInterval(() => this.saveGame(), AUTOSAVE_INTERVAL_MS);
+  }
+
+  updateSaveMenu() {
+    const savedGame = this.readSavedGame();
+    $('continue-button').classList.toggle('hidden', !savedGame);
+    $('play-button').textContent = savedGame ? 'Nueva partida' : 'Jugar';
+  }
+
+  readSavedGame() {
+    try {
+      const rawSave = window.localStorage.getItem(AUTOSAVE_KEY);
+      if (!rawSave) return null;
+
+      const save = JSON.parse(rawSave);
+      const validRooms = ['recepcion', 'pasillo', 'celdas', 'descanso', 'sotano', 'sala-control', 'patio'];
+      if (
+        save?.version !== 1
+        || !validRooms.includes(save.room)
+        || (save.weapon !== null && !['pistola', 'bate', 'escopeta'].includes(save.weapon))
+        || (save.restRoomWeapon !== null && !['pistola', 'bate', 'escopeta'].includes(save.restRoomWeapon))
+        || !Number.isFinite(save.player?.x)
+        || !Number.isFinite(save.player?.y)
+        || !Number.isFinite(save.player?.scale)
+        || !Number.isFinite(save.playerHealth)
+        || !save.ammo
+        || !Number.isFinite(save.ammo.pistola)
+        || !Number.isFinite(save.ammo.escopeta)
+        || !Array.isArray(save.firearmsAcquired)
+        || !Array.isArray(save.corpse)
+        || !Array.isArray(save.cellDoorStates)
+        || !Array.isArray(save.collectedHealingItems)
+        || !Array.isArray(save.collectedAmmoItems)
+        || !Array.isArray(save.spawnedRoomEncounters)
+        || !Array.isArray(save.roomZombies)
+        || !Array.isArray(save.cellZombies)
+        || !Array.isArray(save.healingItems)
+        || !Array.isArray(save.ammoItems)
+        || !Number.isFinite(save.finalBossHealth)
+        || !Number.isFinite(save.finalBossPosition?.x)
+        || !Number.isFinite(save.finalBossPosition?.y)
+        || !Number.isFinite(save.finalBossKeyPosition?.x)
+        || !Number.isFinite(save.finalBossKeyPosition?.y)
+      ) {
+        throw new Error('El archivo de autoguardado no tiene un formato válido.');
+      }
+      return save;
+    } catch (error) {
+      console.error('No se pudo leer el autoguardado.', error);
+      $('save-status').textContent = 'No se pudo leer el autoguardado. Revisa la consola del navegador.';
+      return null;
+    }
+  }
+
+  saveGame({ required = false, notify = false, room = this.currentRoom, player = this.player } = {}) {
+    const transitionInProgress = ['opening', 'closing'].includes(this.entryDoorState)
+      || this.zombieState === 'entering'
+      || this.cellDoorStates.includes('opening')
+      || (this.finalBossExplosiveUsed && !this.finalBossDefeated);
+    if (
+      !this.gameStarted
+      || !this.playerAlive
+      || this.ui
+      || this.attackInProgress
+      || transitionInProgress
+    ) return false;
+
+    const save = {
+      version: 1,
+      savedAt: Date.now(),
+      room,
+      player: { x: player.x, y: player.y, scale: player.scale ?? player.scaleX },
+      facing: room === 'patio' && this.currentRoom === 'pasillo' ? 'north' : this.facing,
+      playerHealth: this.playerHealth,
+      weapon: this.weapon,
+      ammo: { ...this.ammo },
+      firearmsAcquired: [...this.firearmsAcquired],
+      corpse: [...this.corpse],
+      noteRead: this.noteRead,
+      zombieSpawned: this.zombieSpawned,
+      zombieState: this.zombieState,
+      zombieVariant: this.zombieVariant?.id ?? null,
+      zombieHealth: this.zombieHealth,
+      zombiePosition: this.zombie ? { x: this.zombie.x, y: this.zombie.y } : null,
+      entryDoorState: this.entryDoorState,
+      doorAnimationPlayed: this.doorAnimationPlayed,
+      hallwayEntered: this.hallwayEntered,
+      cellDoorStates: [...this.cellDoorStates],
+      cellZombies: this.cellZombies.map(({ sprite, variant, health, state }) => ({
+        variant: variant.id, health, state, x: sprite.x, y: sprite.y,
+      })),
+      restRoomKeyCollected: this.restRoomKeyCollected,
+      restRoomWeapon: this.restRoomWeapon,
+      basementLockpickCollected: this.basementLockpickCollected,
+      basementUnlocked: this.basementUnlocked,
+      basementDoorOpened: this.basementDoorOpened,
+      restNoteRead: this.restNoteRead,
+      controlRoomNoteRead: this.controlRoomNoteRead,
+      controlRoomLightsOff: this.controlRoomLightsOff,
+      controlRoomFlashlightOn: this.controlRoomFlashlightOn,
+      restRoomSpareFuseCollected: this.restRoomSpareFuseCollected,
+      patioDoorUnlocked: this.patioDoorUnlocked,
+      collectedHealingItems: [...this.collectedHealingItems],
+      collectedAmmoItems: [...this.collectedAmmoItems],
+      healingItems: this.healingItems.map(({ id, x, y }) => ({ id, x, y })),
+      ammoItems: this.ammoItems.map(({ id, weapon, x, y }) => ({ id, weapon, x, y })),
+      spawnedRoomEncounters: [...this.spawnedRoomEncounters],
+      roomZombies: this.roomZombies.map(({ sprite, variant, room, health, state }) => ({
+        variant: variant.id, room, health, state, x: sprite.x, y: sprite.y,
+      })),
+      bossArenaSuppliesPrepared: this.bossArenaSuppliesPrepared,
+      finalBossHealth: this.finalBossHealth,
+      finalBossPosition: { x: this.finalBoss.x, y: this.finalBoss.y },
+      finalBossDefeated: this.finalBossDefeated,
+      finalBossExplosiveUsed: this.finalBossExplosiveUsed,
+      finalBossKeyCollected: this.finalBossKeyCollected,
+      finalBossKeyPosition: { x: this.finalBossKeySprite.x, y: this.finalBossKeySprite.y },
+      patioGateUnlocked: this.patioGateUnlocked,
+    };
+
+    try {
+      window.localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(save));
+    } catch (error) {
+      console.error('No se pudo escribir el autoguardado.', error);
+      $('save-status').textContent = 'No se pudo guardar la partida en este navegador.';
+      if (!required) this.toast('No se pudo guardar la partida. Revisa el almacenamiento del navegador.');
+      return false;
+    }
+
+    $('save-status').textContent = 'Partida guardada en este navegador.';
+    if (notify) this.toast('Punto de control guardado.');
+    return true;
+  }
+
+  clearSavedGame() {
+    try {
+      window.localStorage.removeItem(AUTOSAVE_KEY);
+    } catch (error) {
+      console.error('No se pudo borrar el autoguardado.', error);
+      $('save-status').textContent = 'No se pudo borrar el autoguardado anterior.';
+      return false;
+    }
+    $('save-status').textContent = '';
+    $('continue-button').classList.add('hidden');
+    $('play-button').textContent = 'Jugar';
+    return true;
+  }
+
+  continueSavedGame() {
+    const save = this.readSavedGame();
+    if (!save) return false;
+
+    this.restoreSavedGame(save);
+    this.gameStarted = true;
+    $('main-menu').classList.add('hidden');
+    $('game-ui').classList.remove('hidden');
+    this.syncMusic(true);
+    this.game.canvas.focus();
+    return true;
+  }
+
+  restoreSavedGame(save) {
+    this.currentRoom = save.room;
+    this.player.setPosition(save.player.x, save.player.y).setScale(save.player.scale);
+    this.player.body.setVelocity(0, 0);
+    this.facing = save.facing || 'south';
+    this.playerHealth = save.playerHealth;
+    this.playerAlive = true;
+    this.weapon = save.weapon;
+    this.ammo = { ...save.ammo };
+    this.firearmsAcquired = new Set(save.firearmsAcquired);
+    this.corpse = [...save.corpse];
+    this.noteRead = save.noteRead;
+    this.zombieSpawned = save.zombieSpawned;
+    this.zombieState = save.zombieState;
+    this.zombieHealth = save.zombieHealth;
+    this.zombieVariant = ZOMBIE_VARIANTS.find(({ id }) => id === save.zombieVariant) ?? null;
+    this.entryDoorState = save.entryDoorState;
+    this.doorAnimationPlayed = save.doorAnimationPlayed;
+    this.hallwayEntered = save.hallwayEntered;
+    this.cellDoorStates = [...save.cellDoorStates];
+    this.restRoomKeyCollected = save.restRoomKeyCollected;
+    this.restRoomWeapon = save.restRoomWeapon;
+    this.basementLockpickCollected = save.basementLockpickCollected;
+    this.basementUnlocked = save.basementUnlocked;
+    this.basementDoorOpened = save.basementDoorOpened;
+    this.restNoteRead = save.restNoteRead;
+    this.controlRoomNoteRead = save.controlRoomNoteRead;
+    this.controlRoomLightsOff = save.controlRoomLightsOff;
+    this.controlRoomFlashlightOn = save.controlRoomFlashlightOn;
+    this.restRoomSpareFuseCollected = save.restRoomSpareFuseCollected;
+    this.patioDoorUnlocked = save.patioDoorUnlocked;
+    this.collectedHealingItems = new Set(save.collectedHealingItems);
+    this.collectedAmmoItems = new Set(save.collectedAmmoItems);
+    this.spawnedRoomEncounters = new Set(save.spawnedRoomEncounters);
+    this.bossArenaSuppliesPrepared = save.bossArenaSuppliesPrepared;
+    this.finalBossHealth = save.finalBossHealth;
+    this.finalBossDefeated = save.finalBossDefeated;
+    this.finalBossExplosiveUsed = save.finalBossExplosiveUsed;
+    this.finalBossKeyCollected = save.finalBossKeyCollected;
+    this.patioGateUnlocked = save.patioGateUnlocked;
+
+    save.healingItems.forEach(({ id, x, y }) => {
+      const item = this.healingItems.find((candidate) => candidate.id === id);
+      const collectible = this.healingSprites.find((candidate) => candidate.id === id);
+      if (!item || !collectible) return;
+      item.x = x;
+      item.y = y;
+      this.tweens.killTweensOf(collectible.sprite);
+      collectible.sprite.setPosition(x, y);
+      this.tweens.add({ targets: collectible.sprite, y: y - 3, yoyo: true, repeat: -1, duration: 700 });
+    });
+    save.ammoItems.forEach(({ id, weapon, x, y }) => {
+      const item = this.ammoItems.find((candidate) => candidate.id === id);
+      const collectible = this.ammoSprites.find((candidate) => candidate.id === id);
+      if (!item || !collectible) return;
+      item.weapon = weapon;
+      item.x = x;
+      item.y = y;
+      if (id === 'ammo-patio-boss') {
+        collectible.sprite.destroy();
+        collectible.sprite = this.createAmmoPickup(item);
+      } else {
+        this.tweens.killTweensOf(collectible.sprite);
+        collectible.sprite.setPosition(x, y);
+        this.tweens.add({ targets: collectible.sprite, y: y - 3, yoyo: true, repeat: -1, duration: 700 });
+      }
+    });
+
+    const backgroundKeys = {
+      recepcion: 'recepcion',
+      pasillo: 'pasillo',
+      celdas: 'celdas',
+      descanso: 'sala-descanso',
+      sotano: 'sotano',
+      'sala-control': 'sala-control',
+    };
+    this.roomBackground.setTexture(backgroundKeys[save.room] ?? 'pasillo')
+      .setDisplaySize(800, 600)
+      .setVisible(save.room !== 'patio');
+    this.patioBackground.setVisible(save.room === 'patio');
+    this.walls.clear(true, true);
+    const createRoomWalls = {
+      recepcion: () => this.createReceptionWalls(),
+      pasillo: () => this.createHallwayWalls(),
+      celdas: () => this.createCellWalls(),
+      descanso: () => this.createRestRoomWalls(),
+      sotano: () => this.createBasementWalls(),
+      'sala-control': () => this.createControlRoomWalls(),
+      patio: () => this.createPatioWalls(),
+    };
+    createRoomWalls[save.room]();
+
+    this.cellZombies.forEach((zombie, index) => {
+      const savedZombie = save.cellZombies[index];
+      if (!savedZombie) return;
+      zombie.variant = ZOMBIE_VARIANTS.find(({ id }) => id === savedZombie.variant) ?? ZOMBIE_VARIANTS[0];
+      zombie.health = savedZombie.health;
+      zombie.state = savedZombie.state;
+      zombie.sprite.setPosition(savedZombie.x, savedZombie.y)
+        .setTexture(`zombie-${zombie.variant.id}`, zombie.state === 'dead'
+          ? `${zombie.variant.id}-dead` : `${zombie.variant.id}-1`);
+      if (zombie.state === 'alive') zombie.sprite.play(`walk-zombie-${zombie.variant.id}`, true);
+    });
+    if (this.zombieSpawned && this.zombieVariant) {
+      const { x, y } = save.zombiePosition ?? { x: 144, y: 205 };
+      this.zombie = this.physics.add.sprite(
+        x, y, `zombie-${this.zombieVariant.id}`,
+        this.zombieState === 'dead' ? `${this.zombieVariant.id}-dead` : `${this.zombieVariant.id}-1`,
+      ).setOrigin(.5, .9).setScale(.33).setDepth(2.5);
+      this.zombie.body.setSize(60, 40).setOffset(114, 150);
+      this.zombie.body.setCollideWorldBounds(true);
+      this.physics.add.collider(this.zombie, this.walls);
+      this.physics.add.collider(this.zombie, this.player);
+      if (this.zombieState === 'alive') this.zombie.play(`walk-zombie-${this.zombieVariant.id}`, true);
+    }
+    this.roomZombies = save.roomZombies.map((savedZombie) => (
+      this.createRoomZombie(savedZombie)
+    ));
+
+    this.finalBoss.setPosition(save.finalBossPosition.x, save.finalBossPosition.y);
+    this.finalBoss.body.setVelocity(0, 0);
+    this.finalBossKeySprite.setPosition(save.finalBossKeyPosition.x, save.finalBossKeyPosition.y);
+    this.finalBossKeyGlint.setPosition(save.finalBossKeyPosition.x, save.finalBossKeyPosition.y - 8);
+    this.finalBossAttacking = false;
+    this.finalBossNextAttackAt = this.time.now;
+    this.finalBossExplosiveUsed = save.finalBossExplosiveUsed;
+    this.setRestRoomWeaponSprite();
+    this.updateRoomObjects();
+    this.setReceptionInteractables();
+    this.refresh();
+    this.setPlayerIdle();
+    this.updateHealthHud();
+    this.updateFinalBossHud();
+    $('modal').classList.add('hidden');
+    this.toast('Partida restaurada.');
   }
 
   clearFrameBackground(context, x, y, width, height, background = 'black') {
@@ -857,6 +1162,7 @@ class Recepcion extends Phaser.Scene {
   }
 
   showFinalCredits() {
+    this.clearSavedGame();
     this.ui = 'ending-credits';
     $('modal-body').innerHTML = `
       <section class="ending-credits" aria-labelledby="ending-credits-title">
@@ -1473,6 +1779,15 @@ class Recepcion extends Phaser.Scene {
     }
 
     this.prepareBossArenaAmmo();
+    if (!this.saveGame({
+      required: true,
+      notify: true,
+      room: 'patio',
+      player: { x: 400, y: 535, scale: .33 },
+    })) {
+      this.toast('No se pudo crear el punto de control. No entrarás a la arena.');
+      return;
+    }
     this.currentRoom = 'patio';
     this.roomBackground.setVisible(false);
     this.patioBackground.setVisible(true);
@@ -1950,29 +2265,43 @@ class Recepcion extends Phaser.Scene {
 
     availablePoints.slice(0, count).forEach((spawnPoint) => {
       const variant = Phaser.Utils.Array.GetRandom(ZOMBIE_VARIANTS);
-      const sprite = this.physics.add.sprite(
-        spawnPoint.x,
-        spawnPoint.y,
-        `zombie-${variant.id}`,
-        `${variant.id}-1`,
-      )
-        .setOrigin(.5, .9)
-        .setScale(.33)
-        .setDepth(2.5);
-      sprite.body.setSize(60, 40).setOffset(114, 150);
-      sprite.body.setCollideWorldBounds(true);
-      this.physics.add.collider(sprite, this.walls);
-      this.physics.add.collider(sprite, this.player);
-      this.roomZombies.push({
-        sprite,
+      this.createRoomZombie({
         variant,
         room,
         health: variant.health,
         state: 'alive',
-        stunnedUntil: 0,
-        knockbackUntil: 0,
+        x: spawnPoint.x,
+        y: spawnPoint.y,
       });
     });
+  }
+
+  createRoomZombie({ variant: variantData, room, health, state, x, y }) {
+    const variant = typeof variantData === 'string'
+      ? ZOMBIE_VARIANTS.find(({ id }) => id === variantData)
+      : variantData;
+    if (!variant) throw new Error('No se pudo restaurar la variante de un zombi.');
+
+    const sprite = this.physics.add.sprite(
+      x,
+      y,
+      `zombie-${variant.id}`,
+      state === 'dead' ? `${variant.id}-dead` : `${variant.id}-1`,
+    )
+      .setOrigin(.5, .9)
+      .setScale(.33)
+      .setDepth(2.5)
+      .setVisible(room === this.currentRoom);
+    sprite.body.setSize(60, 40).setOffset(114, 150);
+    sprite.body.setCollideWorldBounds(true);
+    sprite.body.enable = room === this.currentRoom && state === 'alive';
+    this.physics.add.collider(sprite, this.walls);
+    this.physics.add.collider(sprite, this.player);
+    if (state === 'alive') sprite.play(`walk-zombie-${variant.id}`, true);
+
+    const zombie = { sprite, variant, room, health, state, stunnedUntil: 0, knockbackUntil: 0 };
+    this.roomZombies.push(zombie);
+    return zombie;
   }
 
   tryHitZombie(direction) {
@@ -2242,7 +2571,7 @@ class Recepcion extends Phaser.Scene {
             this.player.x,
             this.player.y,
           ) > FINAL_BOSS_ATTACK_RANGE + 25) return;
-          this.toast(`El jefe conecta un ${attackName}: ${damage} PV. Invulnerable para la prueba.`);
+          this.toast(`El jefe conecta un ${attackName}: ${damage} PV.`);
           this.applyPlayerDamage(damage);
         });
         this.finalBoss.once('animationcomplete', () => {
@@ -2350,7 +2679,7 @@ class Recepcion extends Phaser.Scene {
   }
 
   applyPlayerDamage(damage, message = `Recibiste ${damage} PV de daño.`) {
-    if (PLAYER_INVULNERABLE || !this.playerAlive) return;
+    if (!this.playerAlive) return;
     this.playerHealth = Math.max(0, this.playerHealth - damage);
     this.updateHealthHud();
     this.toast(message);
@@ -3216,13 +3545,25 @@ $('test-damage-button').addEventListener('click', () => {
 });
 
 $('play-button').addEventListener('click', () => {
+  const scene = game.scene.getScene('Recepcion');
+  scene.clearSavedGame();
   $('main-menu').classList.add('hidden');
   $('game-ui').classList.remove('hidden');
-  const scene = game.scene.getScene('Recepcion');
   scene.gameStarted = true;
   scene.player?.body.setVelocity(0, 0);
   scene.syncMusic(true);
+  scene.saveGame();
   game.canvas.focus();
+});
+
+$('continue-button').addEventListener('click', () => {
+  const scene = game.scene.getScene('Recepcion');
+  try {
+    scene.continueSavedGame();
+  } catch (error) {
+    console.error('No se pudo restaurar la partida.', error);
+    $('save-status').textContent = 'No se pudo restaurar la partida. Revisa la consola del navegador.';
+  }
 });
 
 $('credits-button').addEventListener('click', () => {

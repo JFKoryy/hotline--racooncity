@@ -65,6 +65,10 @@ body {
   outline: none; transform: translateX(4px); border-color: var(--amber);
   background: rgba(48, 23, 27, .96); color: #fff;
 }
+.save-status {
+  min-height: 1em; margin: 0; color: var(--muted);
+  font: 400 max(7px, .75cqw) var(--type);
+}
 .menu-button-muted { color: var(--muted); border-left-color: var(--line); }
 .screen-message {
   position: absolute; z-index: 1; inset: 0; display: flex; flex-direction: column;
