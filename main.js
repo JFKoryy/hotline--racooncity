@@ -404,8 +404,11 @@ class Recepcion extends Phaser.Scene {
 
   updateSaveMenu() {
     const savedGame = this.readSavedGame();
-    $('continue-button').classList.toggle('hidden', !savedGame);
+    const continueButton = $('continue-button');
+    continueButton.classList.toggle('hidden', !savedGame);
+    continueButton.disabled = !savedGame;
     $('play-button').textContent = savedGame ? 'Nueva partida' : 'Jugar';
+    $('play-button').disabled = false;
   }
 
   readSavedGame() {
@@ -459,7 +462,10 @@ class Recepcion extends Phaser.Scene {
       || this.cellDoorStates.includes('opening')
       || (this.finalBossExplosiveUsed && !this.finalBossDefeated);
     if (
-      !this.gameStarted
+      !player
+      || !this.finalBoss
+      || !this.finalBossKeySprite
+      || !this.gameStarted
       || !this.playerAlive
       || this.ui
       || this.attackInProgress
@@ -3546,6 +3552,11 @@ $('test-damage-button').addEventListener('click', () => {
 
 $('play-button').addEventListener('click', () => {
   const scene = game.scene.getScene('Recepcion');
+  if (!scene.player || !scene.finalBoss || !scene.finalBossKeySprite) {
+    console.error('La partida todavía está cargando; no se puede iniciar aún.');
+    $('save-status').textContent = 'El juego todavía se está cargando. Espera un momento.';
+    return;
+  }
   scene.clearSavedGame();
   $('main-menu').classList.add('hidden');
   $('game-ui').classList.remove('hidden');
