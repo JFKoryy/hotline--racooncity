@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hotline RacoonCity</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Special+Elite&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="wrap">
+    <div id="game"></div>
+    <div id="vignette"></div>
+    <div id="flashlight-hint" class="hidden" role="status" aria-live="polite">
+      presiona <kbd>F</kbd> para encender la lampara
+    </div>
+
+    <div id="game-ui" class="hidden">
+      <canvas id="control-room-light" class="hidden" width="800" height="600" aria-hidden="true"></canvas>
+      <div id="hud">
+        <div id="health-slot" aria-label="Vida del jugador">
+          <div class="health-heading"><span class="lbl">VIDA</span><span id="health-value">450 / 450</span></div>
+          <div id="health-track"><div id="health-bar"></div></div>
+          <button id="test-damage-button" type="button">Probar daño −20 PV</button>
+        </div>
+        <div id="boss-health-slot" class="hidden" aria-label="Vida del jefe">
+          <div class="health-heading"><span class="lbl">JEFE FINAL</span><span id="boss-health-value"></span></div>
+          <div id="boss-health-track"><div id="boss-health-bar"></div></div>
+        </div>
+        <div id="weapon-slot">
+          <span class="lbl">ARMA</span>
+          <span id="weapon-name" class="empty">Desarmado</span>
+          <span id="ammo-value" class="hidden"></span>
+        </div>
+        <div id="hint">WASD / flechas mover · E interactuar · H ocultar HUD · Clic derecho apuntar · Clic izquierdo atacar</div>
+      </div>
+      <div id="prompt" class="hidden"><kbd>E</kbd><span id="prompt-text"></span></div>
+      <div id="toast" class="hidden"></div>
+      <div id="modal" class="hidden"><div id="modal-body"></div></div>
+    </div>
+
+    <section id="main-menu" class="screen" aria-label="Menú principal">
+      <img class="screen-art" src="assets/portada.jpg" alt="">
+      <div class="screen-shade"></div>
+      <div id="menu-panel" class="menu-panel">
+        <button id="play-button" class="menu-button">Jugar</button>
+        <button id="credits-button" class="menu-button">Créditos</button>
+        <button id="exit-button" class="menu-button menu-button-muted">Salir</button>
+      </div>
+      <div id="exit-message" class="screen-message hidden">
+        <p>Para salir, cierra esta pestaña.</p>
+        <button id="exit-back-button" class="menu-button">Volver</button>
+      </div>
+      <div id="credits-panel" class="screen-message hidden">
+        <h1>Créditos</h1>
+        <p>Hotline RacoonCity</p>
+        <ul class="credits-list">
+          <li>Jesús Múnera</li>
+          <li>Jesucristo</li>
+          <li>Dios (tal vez)</li>
+          <li>Mucha cerveza</li>
+          <li>Malboro Rojo</li>
+          <li>Gemini IA</li>
+          <li>Mi Copiloto</li>
+        </ul>
+        <button id="credits-back-button" class="menu-button">Volver</button>
+      </div>
+    </section>
+
+    <section id="game-over" class="screen hidden" aria-label="Fin del juego">
+      <img class="screen-art" src="assets/muerte.jpg" alt="Has muerto">
+      <div class="screen-shade"></div>
+      <button id="retry-button" class="menu-button retry-button">Volver a jugar</button>
+    </section>
+
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
